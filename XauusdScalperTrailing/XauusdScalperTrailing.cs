@@ -146,7 +146,8 @@ namespace cAlgo.Robots
 
             if (!IsSpreadOk())
             {
-                Print("Trade saltato: spread troppo alto ({0:F1} pip).", Symbol.Spread / Symbol.PipSize);
+                Print("Trade saltato: spread {0:F1} pip > limite {1} pip (parametro 'Spread massimo'). Alzalo o mettilo a 0 per disattivarlo.",
+                    Symbol.Spread / Symbol.PipSize, MaxSpreadPips);
                 return;
             }
 
