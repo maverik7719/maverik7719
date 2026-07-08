@@ -53,6 +53,18 @@ Aprilo/compilalo con l'editor di cTrader (o `dotnet build`) e poi installa il `.
 - **Ora inizio / Ora fine (UTC)** — finestra ad alta liquidità (default 7–20), per
   evitare la sessione asiatica dove lo scalping M1 fa più whipsaw.
 
+### Volatilità (ATR)
+Modo "morbido" per modulare la frequenza: opera solo quando c'è movimento reale,
+invece di spegnere interi orari/direzioni.
+- **Filtro ATR attivo** — attiva/disattiva il filtro.
+- **ATR periodo** — periodo dell'ATR (default 14).
+- **ATR minimo (pip)** — sotto questa volatilità (mercato piatto) non entra.
+- **ATR massimo (pip, 0 = off)** — sopra questa volatilità (troppo caos) non entra.
+
+Suggerimento: con il filtro ATR attivo puoi **allentare** i filtri secchi
+(distanza minima EMA a 0, filtro orario off, filtro trend più basso) e regolare la
+frequenza soprattutto con **ATR minimo**: più alto = meno trade ma più "mossi".
+
 ### Stop / Trailing
 - **Stop Loss iniziale (pip)** — SL messo all'apertura.
 - **Attiva Break-Even a (pip di profitto)** — quando spostare lo SL al pareggio.

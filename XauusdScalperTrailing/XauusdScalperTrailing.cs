@@ -68,6 +68,27 @@ namespace cAlgo.Robots
 
         #endregion
 
+        #region Parametri - Volatilità (ATR)
+
+        // Filtro di volatilità: opera solo quando c'è "movimento" sufficiente,
+        // misurato dall'ATR. È un modo morbido per modulare la frequenza: invece
+        // di spegnere interi orari/direzioni, salta solo le fasi piatte.
+        [Parameter("Filtro ATR attivo", Group = "Volatilità (ATR)", DefaultValue = true)]
+        public bool UseAtrFilter { get; set; }
+
+        [Parameter("ATR periodo", Group = "Volatilità (ATR)", DefaultValue = 14, MinValue = 1)]
+        public int AtrPeriod { get; set; }
+
+        // Sotto questo ATR (in pip) il mercato è troppo fermo: niente trade.
+        [Parameter("ATR minimo (pip)", Group = "Volatilità (ATR)", DefaultValue = 8, MinValue = 0)]
+        public double MinAtrPips { get; set; }
+
+        // Sopra questo ATR (in pip) la volatilità è eccessiva: niente trade. 0 = off.
+        [Parameter("ATR massimo (pip, 0 = off)", Group = "Volatilità (ATR)", DefaultValue = 0, MinValue = 0)]
+        public double MaxAtrPips { get; set; }
+
+        #endregion
+
         #region Parametri - Stop Loss / Trailing
 
         [Parameter("Stop Loss iniziale (pip)", Group = "Stop / Trailing", DefaultValue = 50, MinValue = 1)]
@@ -129,6 +150,7 @@ namespace cAlgo.Robots
         private ExponentialMovingAverage _fastEma;
         private ExponentialMovingAverage _slowEma;
         private ExponentialMovingAverage _trendEma;
+        private AverageTrueRange _atr;
         // Sentinella "nessun trade ancora fatto": valore basso ma sicuro, così
         // (Bars.Count - _lastTradeBarIndex) non va mai in overflow.
         private int _lastTradeBarIndex = -1000000;
@@ -141,6 +163,7 @@ namespace cAlgo.Robots
             _slowEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, SlowEmaPeriod);
             if (TrendFilterPeriod > 0)
                 _trendEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, TrendFilterPeriod);
+            _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.Exponential);
 
             if (FastEmaPeriod >= SlowEmaPeriod)
                 Print("Attenzione: EMA veloce >= EMA lenta. Controlla i parametri.");
@@ -291,6 +314,9 @@ namespace cAlgo.Robots
             }
 
             if (!IsWithinSession())
+                return;
+
+            if (!IsVolatilityOk())
                 return;
 
             if (SinglePosition && HasPositionInDirection(signal))
@@ -486,6 +512,26 @@ namespace cAlgo.Robots
             if (MaxSpreadPips <= 0)
                 return true;
             return Symbol.Spread / Symbol.PipSize <= MaxSpreadPips;
+        }
+
+        // Vero se la volatilità (ATR dell'ultima barra chiusa) è nell'intervallo
+        // consentito: opera solo quando c'è movimento sufficiente.
+        private bool IsVolatilityOk()
+        {
+            if (!UseAtrFilter)
+                return true;
+
+            int i = Bars.Count - 2;
+            if (i < 0 || double.IsNaN(_atr.Result[i]))
+                return true;
+
+            double atrPips = _atr.Result[i] / Symbol.PipSize;
+
+            if (MinAtrPips > 0 && atrPips < MinAtrPips)
+                return false;
+            if (MaxAtrPips > 0 && atrPips > MaxAtrPips)
+                return false;
+            return true;
         }
 
         // Vero se l'ora corrente (UTC) è dentro la finestra di sessione.
