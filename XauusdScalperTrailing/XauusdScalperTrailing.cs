@@ -13,7 +13,8 @@ namespace cAlgo.Robots
     public enum EntryStrategy
     {
         IncrocioEma,
-        TrendPullback
+        TrendPullback,
+        Momentum
     }
 
     [Robot(AccessRights = AccessRights.None, TimeZone = TimeZones.UTC)]
@@ -118,8 +119,15 @@ namespace cAlgo.Robots
         // - TrendPullback: in trend (EMA allineate) entra sui ritracciamenti quando il
         //   prezzo rientra oltre la EMA veloce. Meno trade, ingressi migliori per un
         //   sistema "no TP" che cavalca il trend.
+        // - Momentum: entra dopo N candele consecutive chiuse nella stessa direzione
+        //   (es. 2 candele rialziste => Buy). Reattivo, adatto a M1.
         [Parameter("Strategia ingresso", Group = "Ingresso", DefaultValue = EntryStrategy.TrendPullback)]
         public EntryStrategy Entry { get; set; }
+
+        // Numero di candele consecutive nello stesso verso richieste dalla
+        // strategia Momentum (una candela è "rialzista" se chiude sopra l'apertura).
+        [Parameter("Momentum: candele consecutive", Group = "Ingresso", DefaultValue = 2, MinValue = 1)]
+        public int MomentumCandles { get; set; }
 
         [Parameter("EMA veloce", Group = "Ingresso", DefaultValue = 9, MinValue = 1)]
         public int FastEmaPeriod { get; set; }
@@ -222,14 +230,50 @@ namespace cAlgo.Robots
             if (i < 1)
                 return null;
 
-            TradeType? signal = Entry == EntryStrategy.IncrocioEma
-                ? GetCrossSignal(i)
-                : GetPullbackSignal(i);
+            TradeType? signal;
+            switch (Entry)
+            {
+                case EntryStrategy.IncrocioEma:
+                    signal = GetCrossSignal(i);
+                    break;
+                case EntryStrategy.Momentum:
+                    signal = GetMomentumSignal(i);
+                    break;
+                default:
+                    signal = GetPullbackSignal(i);
+                    break;
+            }
 
             if (signal.HasValue && !PassesTrendFilter(signal.Value, i))
                 return null;
 
             return signal;
+        }
+
+        // Strategia 3: momentum di candele. Entra quando le ultime N candele chiuse
+        // sono tutte nello stesso verso (corpo positivo => rialzista, e viceversa).
+        private TradeType? GetMomentumSignal(int i)
+        {
+            int n = MomentumCandles;
+            if (i - n + 1 < 0)
+                return null;
+
+            bool allBull = true;
+            bool allBear = true;
+
+            for (int k = 0; k < n; k++)
+            {
+                int idx = i - k;
+                double open = Bars.OpenPrices[idx];
+                double close = Bars.ClosePrices[idx];
+
+                if (close <= open) allBull = false;
+                if (close >= open) allBear = false;
+            }
+
+            if (allBull) return TradeType.Buy;
+            if (allBear) return TradeType.Sell;
+            return null;
         }
 
         // Strategia 1: incrocio EMA veloce/lenta.

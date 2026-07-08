@@ -74,9 +74,11 @@ frequenza soprattutto con **ATR minimo**: più alto = meno trade ma più "mossi"
 - **Passo minimo Trailing (pip)** — sposta lo SL solo se migliora di almeno tot pip.
 
 ### Ingresso (EMA)
-- **Strategia ingresso** — `IncrocioEma` (entra sull'incrocio EMA) oppure `TrendPullback`
-  (in trend, entra sui ritracciamenti quando il prezzo riattraversa la EMA veloce nella
-  direzione del trend). `TrendPullback` genera meno trade e più mirati.
+- **Strategia ingresso** — `IncrocioEma` (incrocio EMA), `TrendPullback` (in trend, entra
+  sui ritracciamenti quando il prezzo riattraversa la EMA veloce) oppure `Momentum` (entra
+  dopo N candele consecutive chiuse nello stesso verso).
+- **Momentum: candele consecutive** — quante candele di fila nello stesso verso servono
+  per entrare (solo strategia `Momentum`; es. 2 = due candele rialziste → Buy).
 - **EMA veloce** / **EMA lenta** — periodi delle medie.
 - **Solo su incrocio (cross)** — (solo modalità IncrocioEma) entra solo sull'incrocio;
   se disattivato segue il trend continuo.
