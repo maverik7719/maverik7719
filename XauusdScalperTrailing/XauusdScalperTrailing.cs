@@ -40,6 +40,26 @@ namespace cAlgo.Robots
         [Parameter("Rischio per trade (% equity, 0 = lotti fissi)", Group = "Rischio", DefaultValue = 0.5, MinValue = 0, Step = 0.1)]
         public double RiskPercentPerTrade { get; set; }
 
+        // Stop di protezione: se l'equity scende di questa % rispetto al picco,
+        // chiude tutto e smette di operare (evita di azzerare il conto). 0 = off.
+        [Parameter("Halt: max drawdown % (0 = off)", Group = "Rischio", DefaultValue = 25, MinValue = 0)]
+        public double MaxDrawdownPercent { get; set; }
+
+        #endregion
+
+        #region Parametri - Sessione
+
+        // Filtro orario: opera solo nelle ore ad alta liquidità (UTC), evitando
+        // la sessione asiatica dove lo scalping M1 tende a fare whipsaw.
+        [Parameter("Filtro orario attivo", Group = "Sessione", DefaultValue = true)]
+        public bool UseSessionFilter { get; set; }
+
+        [Parameter("Ora inizio (UTC)", Group = "Sessione", DefaultValue = 7, MinValue = 0, MaxValue = 23)]
+        public int SessionStartHour { get; set; }
+
+        [Parameter("Ora fine (UTC)", Group = "Sessione", DefaultValue = 20, MinValue = 0, MaxValue = 23)]
+        public int SessionEndHour { get; set; }
+
         #endregion
 
         #region Parametri - Stop Loss / Trailing
@@ -85,6 +105,11 @@ namespace cAlgo.Robots
         [Parameter("Barre minime tra i trade", Group = "Ingresso", DefaultValue = 3, MinValue = 0)]
         public int MinBarsBetweenTrades { get; set; }
 
+        // Forza del segnale: al cross le EMA devono essere separate di almeno
+        // questi pip. Scarta i cross "piatti" nel rumore (0 = disattivato).
+        [Parameter("Distanza minima EMA al cross (pip, 0 = off)", Group = "Ingresso", DefaultValue = 5, MinValue = 0)]
+        public double MinEmaGapPips { get; set; }
+
         #endregion
 
         private ExponentialMovingAverage _fastEma;
@@ -93,6 +118,8 @@ namespace cAlgo.Robots
         // Sentinella "nessun trade ancora fatto": valore basso ma sicuro, così
         // (Bars.Count - _lastTradeBarIndex) non va mai in overflow.
         private int _lastTradeBarIndex = -1000000;
+        private double _peakEquity;
+        private bool _tradingHalted;
 
         protected override void OnStart()
         {
@@ -104,6 +131,8 @@ namespace cAlgo.Robots
             if (FastEmaPeriod >= SlowEmaPeriod)
                 Print("Attenzione: EMA veloce >= EMA lenta. Controlla i parametri.");
 
+            _peakEquity = Account.Equity;
+
             Print("XAUUSD Scalper Trailing avviato su {0} {1}. PipSize={2}", SymbolName, TimeFrame, Symbol.PipSize);
         }
 
@@ -112,6 +141,30 @@ namespace cAlgo.Robots
         protected override void OnTick()
         {
             ManageOpenPositions();
+            CheckDrawdownGuard();
+        }
+
+        // Stop di protezione del capitale: chiude tutto e blocca l'operatività
+        // se l'equity scende oltre la % di drawdown dal picco.
+        private void CheckDrawdownGuard()
+        {
+            if (_tradingHalted || MaxDrawdownPercent <= 0)
+                return;
+
+            if (Account.Equity > _peakEquity)
+                _peakEquity = Account.Equity;
+
+            if (_peakEquity <= 0)
+                return;
+
+            double drawdown = (_peakEquity - Account.Equity) / _peakEquity * 100.0;
+            if (drawdown >= MaxDrawdownPercent)
+            {
+                _tradingHalted = true;
+                foreach (var pos in GetMyPositions())
+                    ClosePosition(pos);
+                Print("STOP protezione: drawdown {0:F1}% >= {1}%. Operatività sospesa.", drawdown, MaxDrawdownPercent);
+            }
         }
 
         // Le decisioni di ingresso vengono prese a barra chiusa (segnale stabile).
@@ -139,6 +192,10 @@ namespace cAlgo.Robots
 
             bool crossedUp = fastPrev <= slowPrev && fastNow > slowNow;
             bool crossedDown = fastPrev >= slowPrev && fastNow < slowNow;
+
+            // Filtro forza: scarta i cross con EMA troppo vicine (mercato piatto).
+            if (MinEmaGapPips > 0 && Math.Abs(fastNow - slowNow) < MinEmaGapPips * Symbol.PipSize)
+                return null;
 
             TradeType? signal;
             if (TradeOnCrossOnly)
@@ -177,6 +234,9 @@ namespace cAlgo.Robots
 
         private void HandleSignal(TradeType signal)
         {
+            if (_tradingHalted)
+                return;
+
             var myPositions = GetMyPositions();
 
             // Gestione posizione opposta: la chiudo (ed eventualmente inverto).
@@ -185,6 +245,9 @@ namespace cAlgo.Robots
                 if (pos.TradeType != signal && CloseOnOppositeSignal)
                     ClosePosition(pos);
             }
+
+            if (!IsWithinSession())
+                return;
 
             if (SinglePosition && HasPositionInDirection(signal))
                 return;
@@ -379,6 +442,21 @@ namespace cAlgo.Robots
             if (MaxSpreadPips <= 0)
                 return true;
             return Symbol.Spread / Symbol.PipSize <= MaxSpreadPips;
+        }
+
+        // Vero se l'ora corrente (UTC) è dentro la finestra di sessione.
+        private bool IsWithinSession()
+        {
+            if (!UseSessionFilter)
+                return true;
+
+            int hour = Server.Time.Hour;
+            if (SessionStartHour == SessionEndHour)
+                return true; // finestra "24h"
+            if (SessionStartHour < SessionEndHour)
+                return hour >= SessionStartHour && hour < SessionEndHour;
+            // Finestra che scavalca la mezzanotte (es. 22 -> 6).
+            return hour >= SessionStartHour || hour < SessionEndHour;
         }
 
         private static double? MaxNullable(double? current, double candidate)

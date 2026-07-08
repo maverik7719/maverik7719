@@ -45,6 +45,13 @@ Aprilo/compilalo con l'editor di cTrader (o `dotnet build`) e poi installa il `.
 - **Rischio per trade (% equity, 0 = lotti fissi)** — dimensiona il volume in modo che,
   se scatta lo SL iniziale, la perdita sia pari a questa % dell'equity. È la protezione
   principale contro l'azzeramento del conto. Metti 0 per usare i "Lotti" fissi.
+- **Halt: max drawdown % (0 = off)** — se l'equity scende di questa % dal picco, chiude
+  tutto e sospende l'operatività (impedisce di arrivare a 0).
+
+### Sessione
+- **Filtro orario attivo** — opera solo in una finestra oraria (UTC).
+- **Ora inizio / Ora fine (UTC)** — finestra ad alta liquidità (default 7–20), per
+  evitare la sessione asiatica dove lo scalping M1 fa più whipsaw.
 
 ### Stop / Trailing
 - **Stop Loss iniziale (pip)** — SL messo all'apertura.
@@ -60,6 +67,8 @@ Aprilo/compilalo con l'editor di cTrader (o `dotnet build`) e poi installa il `.
 - **Filtro trend EMA (periodo, 0 = off)** — long solo se il prezzo è sopra questa EMA lunga,
   short solo se è sotto. Riduce gli ingressi in controtrend (default 200).
 - **Barre minime tra i trade** — cooldown anti-whipsaw tra un ingresso e il successivo.
+- **Distanza minima EMA al cross (pip, 0 = off)** — richiede che al cross le EMA siano
+  separate di almeno N pip, così scarta i cross "piatti" nel rumore.
 
 ## Perché un test può andare a -100% (e come evitarlo)
 
