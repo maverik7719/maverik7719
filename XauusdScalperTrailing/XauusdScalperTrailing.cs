@@ -15,7 +15,7 @@ namespace cAlgo.Robots
     {
         #region Parametri - Trade
 
-        [Parameter("Lotti", Group = "Trade", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01)]
+        [Parameter("Lotti (se rischio % = 0)", Group = "Trade", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01)]
         public double LotSize { get; set; }
 
         [Parameter("Etichetta (Label)", Group = "Trade", DefaultValue = "XAU_ScalperTrailing")]
@@ -29,6 +29,16 @@ namespace cAlgo.Robots
 
         [Parameter("Spread massimo (pip, 0 = off)", Group = "Trade", DefaultValue = 30, MinValue = 0)]
         public double MaxSpreadPips { get; set; }
+
+        #endregion
+
+        #region Parametri - Rischio
+
+        // Sizing basato sul rischio: il volume viene calcolato in modo che, se
+        // scatta lo Stop Loss iniziale, la perdita sia pari a questa % dell'equity.
+        // Mettere a 0 per usare invece il volume fisso "Lotti".
+        [Parameter("Rischio per trade (% equity, 0 = lotti fissi)", Group = "Rischio", DefaultValue = 0.5, MinValue = 0, Step = 0.1)]
+        public double RiskPercentPerTrade { get; set; }
 
         #endregion
 
@@ -65,15 +75,29 @@ namespace cAlgo.Robots
         [Parameter("Solo su incrocio (cross)", Group = "Ingresso", DefaultValue = true)]
         public bool TradeOnCrossOnly { get; set; }
 
+        // Filtro di trend: compra solo se il prezzo è sopra questa EMA, vende solo
+        // se è sotto. Riduce gli ingressi in controtrend (0 = filtro disattivato).
+        [Parameter("Filtro trend EMA (periodo, 0 = off)", Group = "Ingresso", DefaultValue = 200, MinValue = 0)]
+        public int TrendFilterPeriod { get; set; }
+
+        // Barre minime di attesa tra un ingresso e il successivo: riduce
+        // l'overtrading/whipsaw tipico dello scalping su M1.
+        [Parameter("Barre minime tra i trade", Group = "Ingresso", DefaultValue = 3, MinValue = 0)]
+        public int MinBarsBetweenTrades { get; set; }
+
         #endregion
 
         private ExponentialMovingAverage _fastEma;
         private ExponentialMovingAverage _slowEma;
+        private ExponentialMovingAverage _trendEma;
+        private int _lastTradeBarIndex = int.MinValue;
 
         protected override void OnStart()
         {
             _fastEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, FastEmaPeriod);
             _slowEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, SlowEmaPeriod);
+            if (TrendFilterPeriod > 0)
+                _trendEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, TrendFilterPeriod);
 
             if (FastEmaPeriod >= SlowEmaPeriod)
                 Print("Attenzione: EMA veloce >= EMA lenta. Controlla i parametri.");
@@ -114,17 +138,39 @@ namespace cAlgo.Robots
             bool crossedUp = fastPrev <= slowPrev && fastNow > slowNow;
             bool crossedDown = fastPrev >= slowPrev && fastNow < slowNow;
 
+            TradeType? signal;
             if (TradeOnCrossOnly)
             {
-                if (crossedUp) return TradeType.Buy;
-                if (crossedDown) return TradeType.Sell;
-                return null;
+                if (crossedUp) signal = TradeType.Buy;
+                else if (crossedDown) signal = TradeType.Sell;
+                else signal = null;
+            }
+            else
+            {
+                // Modalità "trend continuo": segue la direzione delle EMA.
+                if (fastNow > slowNow) signal = TradeType.Buy;
+                else if (fastNow < slowNow) signal = TradeType.Sell;
+                else signal = null;
             }
 
-            // Modalità "trend continuo": segue la direzione delle EMA.
-            if (fastNow > slowNow) return TradeType.Buy;
-            if (fastNow < slowNow) return TradeType.Sell;
-            return null;
+            if (signal.HasValue && !PassesTrendFilter(signal.Value, i))
+                return null;
+
+            return signal;
+        }
+
+        // Filtro di trend: long solo sopra l'EMA lunga, short solo sotto.
+        private bool PassesTrendFilter(TradeType signal, int barIndex)
+        {
+            if (_trendEma == null)
+                return true;
+
+            double price = Bars.ClosePrices[barIndex];
+            double trend = _trendEma.Result[barIndex];
+
+            if (signal == TradeType.Buy)
+                return price > trend;
+            return price < trend;
         }
 
         private void HandleSignal(TradeType signal)
@@ -144,6 +190,10 @@ namespace cAlgo.Robots
             if (SinglePosition && GetMyPositions().Length > 0 && !CloseOnOppositeSignal)
                 return;
 
+            // Cooldown: evita di riaprire troppo presto (anti-whipsaw).
+            if (MinBarsBetweenTrades > 0 && Bars.Count - _lastTradeBarIndex <= MinBarsBetweenTrades)
+                return;
+
             if (!IsSpreadOk())
             {
                 Print("Trade saltato: spread {0:F1} pip > limite {1} pip (parametro 'Spread massimo'). Alzalo o mettilo a 0 per disattivarlo.",
@@ -156,19 +206,48 @@ namespace cAlgo.Robots
 
         private void OpenTrade(TradeType tradeType)
         {
-            double volume = Symbol.NormalizeVolumeInUnits(Symbol.QuantityToVolumeInUnits(LotSize), RoundingMode.ToNearest);
+            double volume = CalculateVolume();
             if (volume <= 0)
             {
-                Print("Volume non valido per {0} lotti.", LotSize);
+                Print("Volume non valido/insufficiente per aprire il trade.");
                 return;
             }
 
             // SL messo subito all'apertura. Nessun Take Profit (null).
             var result = ExecuteMarketOrder(tradeType, SymbolName, volume, Label, StopLossPips, null);
             if (result.IsSuccessful)
-                Print("Aperta {0} {1} a {2} - SL iniziale {3} pip.", tradeType, volume, result.Position.EntryPrice, StopLossPips);
+            {
+                _lastTradeBarIndex = Bars.Count;
+                Print("Aperta {0} vol {1} a {2} - SL iniziale {3} pip.", tradeType, volume, result.Position.EntryPrice, StopLossPips);
+            }
             else
+            {
                 Print("Ordine fallito: {0}", result.Error);
+            }
+        }
+
+        // Se "Rischio per trade" > 0, dimensiona il volume in base al rischio:
+        // perdita a SL = RiskPercent% dell'equity. Altrimenti usa i lotti fissi.
+        private double CalculateVolume()
+        {
+            if (RiskPercentPerTrade <= 0)
+                return Symbol.NormalizeVolumeInUnits(Symbol.QuantityToVolumeInUnits(LotSize), RoundingMode.ToNearest);
+
+            double riskAmount = Account.Equity * RiskPercentPerTrade / 100.0;
+            double lossPerUnit = StopLossPips * Symbol.PipValue; // valore di 1 unità se colpisce lo SL
+            if (lossPerUnit <= 0)
+                return 0;
+
+            double rawUnits = riskAmount / lossPerUnit;
+            double volume = Symbol.NormalizeVolumeInUnits(rawUnits, RoundingMode.Down);
+
+            // Sotto il minimo: non forzo il volume minimo (rischierei più del previsto).
+            if (volume < Symbol.VolumeInUnitsMin)
+            {
+                Print("Rischio {0}% troppo basso per il volume minimo: trade saltato.", RiskPercentPerTrade);
+                return 0;
+            }
+            return volume;
         }
 
         #endregion

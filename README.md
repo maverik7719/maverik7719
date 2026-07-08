@@ -35,11 +35,16 @@ Aprilo/compilalo con l'editor di cTrader (o `dotnet build`) e poi installa il `.
 ## Parametri
 
 ### Trade
-- **Lotti** — dimensione posizione (es. 0.01).
+- **Lotti (se rischio % = 0)** — volume fisso usato solo quando il rischio % è 0.
 - **Etichetta (Label)** — identifica le posizioni del bot.
 - **Una posizione alla volta** — evita di sovrapporre più trade.
 - **Chiudi su segnale opposto** — quando il trend inverte chiude subito (oltre allo SL).
 - **Spread massimo (pip)** — non entra se lo spread è troppo alto (0 = disattivato).
+
+### Rischio
+- **Rischio per trade (% equity, 0 = lotti fissi)** — dimensiona il volume in modo che,
+  se scatta lo SL iniziale, la perdita sia pari a questa % dell'equity. È la protezione
+  principale contro l'azzeramento del conto. Metti 0 per usare i "Lotti" fissi.
 
 ### Stop / Trailing
 - **Stop Loss iniziale (pip)** — SL messo all'apertura.
@@ -52,6 +57,22 @@ Aprilo/compilalo con l'editor di cTrader (o `dotnet build`) e poi installa il `.
 ### Ingresso (EMA)
 - **EMA veloce** / **EMA lenta** — periodi delle medie.
 - **Solo su incrocio (cross)** — entra solo sull'incrocio; se disattivato segue il trend continuo.
+- **Filtro trend EMA (periodo, 0 = off)** — long solo se il prezzo è sopra questa EMA lunga,
+  short solo se è sotto. Riduce gli ingressi in controtrend (default 200).
+- **Barre minime tra i trade** — cooldown anti-whipsaw tra un ingresso e il successivo.
+
+## Perché un test può andare a -100% (e come evitarlo)
+
+Con volume fisso e senza controllo del rischio, una serie di stop può azzerare il conto,
+soprattutto su M1 dove l'incrocio EMA genera molti falsi segnali (overtrading/whipsaw).
+Per questo ora, di default:
+
+- il volume è calcolato sul **rischio %** (una perdita = solo la % scelta dell'equity);
+- c'è un **filtro di trend** (EMA 200) che taglia gli ingressi controtrend;
+- c'è un **cooldown** tra i trade.
+
+Consiglio per il backtest: parti con **Rischio 0.5%**, **Filtro trend 200**, **Barre minime 3**,
+e valuta anche di alzare le EMA (es. 21/50) per ridurre il rumore su M1.
 
 ## Note importanti
 
