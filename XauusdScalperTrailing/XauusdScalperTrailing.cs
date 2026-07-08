@@ -10,6 +10,12 @@ namespace cAlgo.Robots
     // Lo SL viene messo subito all'apertura, poi va in Break-Even e infine
     // segue il prezzo (trailing) restando a una distanza configurabile.
     // Quando il trend inverte il trailing SL viene colpito e la posizione chiude.
+    public enum EntryStrategy
+    {
+        IncrocioEma,
+        TrendPullback
+    }
+
     [Robot(AccessRights = AccessRights.None, TimeZone = TimeZones.UTC)]
     public class XauusdScalperTrailing : Robot
     {
@@ -85,6 +91,14 @@ namespace cAlgo.Robots
         #endregion
 
         #region Parametri - Ingresso (EMA)
+
+        // Strategia di ingresso:
+        // - IncrocioEma: entra sull'incrocio EMA veloce/lenta (trend-following classico).
+        // - TrendPullback: in trend (EMA allineate) entra sui ritracciamenti quando il
+        //   prezzo rientra oltre la EMA veloce. Meno trade, ingressi migliori per un
+        //   sistema "no TP" che cavalca il trend.
+        [Parameter("Strategia ingresso", Group = "Ingresso", DefaultValue = EntryStrategy.TrendPullback)]
+        public EntryStrategy Entry { get; set; }
 
         [Parameter("EMA veloce", Group = "Ingresso", DefaultValue = 9, MinValue = 1)]
         public int FastEmaPeriod { get; set; }
@@ -177,7 +191,7 @@ namespace cAlgo.Robots
 
         #region Logica di ingresso
 
-        // Ritorna Buy, Sell oppure null in base al trend delle EMA.
+        // Ritorna Buy, Sell oppure null in base alla strategia scelta.
         private TradeType? GetSignal()
         {
             // Indice della barra appena chiusa.
@@ -185,6 +199,19 @@ namespace cAlgo.Robots
             if (i < 1)
                 return null;
 
+            TradeType? signal = Entry == EntryStrategy.IncrocioEma
+                ? GetCrossSignal(i)
+                : GetPullbackSignal(i);
+
+            if (signal.HasValue && !PassesTrendFilter(signal.Value, i))
+                return null;
+
+            return signal;
+        }
+
+        // Strategia 1: incrocio EMA veloce/lenta.
+        private TradeType? GetCrossSignal(int i)
+        {
             double fastNow = _fastEma.Result[i];
             double slowNow = _slowEma.Result[i];
             double fastPrev = _fastEma.Result[i - 1];
@@ -197,25 +224,42 @@ namespace cAlgo.Robots
             if (MinEmaGapPips > 0 && Math.Abs(fastNow - slowNow) < MinEmaGapPips * Symbol.PipSize)
                 return null;
 
-            TradeType? signal;
             if (TradeOnCrossOnly)
             {
-                if (crossedUp) signal = TradeType.Buy;
-                else if (crossedDown) signal = TradeType.Sell;
-                else signal = null;
-            }
-            else
-            {
-                // Modalità "trend continuo": segue la direzione delle EMA.
-                if (fastNow > slowNow) signal = TradeType.Buy;
-                else if (fastNow < slowNow) signal = TradeType.Sell;
-                else signal = null;
-            }
-
-            if (signal.HasValue && !PassesTrendFilter(signal.Value, i))
+                if (crossedUp) return TradeType.Buy;
+                if (crossedDown) return TradeType.Sell;
                 return null;
+            }
 
-            return signal;
+            // Modalità "trend continuo": segue la direzione delle EMA.
+            if (fastNow > slowNow) return TradeType.Buy;
+            if (fastNow < slowNow) return TradeType.Sell;
+            return null;
+        }
+
+        // Strategia 2: trend + pullback. In trend (EMA veloce vs lenta allineate)
+        // entra quando il prezzo, dopo un ritracciamento oltre la EMA veloce, la
+        // riattraversa nella direzione del trend.
+        private TradeType? GetPullbackSignal(int i)
+        {
+            double fastNow = _fastEma.Result[i];
+            double slowNow = _slowEma.Result[i];
+            double fastPrev = _fastEma.Result[i - 1];
+            double closeNow = Bars.ClosePrices[i];
+            double closePrev = Bars.ClosePrices[i - 1];
+
+            bool trendUp = fastNow > slowNow;
+            bool trendDown = fastNow < slowNow;
+
+            // Long: in trend up il prezzo era sotto/uguale alla EMA veloce e ora
+            // chiude sopra (rientro dopo il ritracciamento).
+            if (trendUp && closePrev <= fastPrev && closeNow > fastNow)
+                return TradeType.Buy;
+
+            if (trendDown && closePrev >= fastPrev && closeNow < fastNow)
+                return TradeType.Sell;
+
+            return null;
         }
 
         // Filtro di trend: long solo sopra l'EMA lunga, short solo sotto.

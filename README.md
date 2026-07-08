@@ -62,8 +62,12 @@ Aprilo/compilalo con l'editor di cTrader (o `dotnet build`) e poi installa il `.
 - **Passo minimo Trailing (pip)** — sposta lo SL solo se migliora di almeno tot pip.
 
 ### Ingresso (EMA)
+- **Strategia ingresso** — `IncrocioEma` (entra sull'incrocio EMA) oppure `TrendPullback`
+  (in trend, entra sui ritracciamenti quando il prezzo riattraversa la EMA veloce nella
+  direzione del trend). `TrendPullback` genera meno trade e più mirati.
 - **EMA veloce** / **EMA lenta** — periodi delle medie.
-- **Solo su incrocio (cross)** — entra solo sull'incrocio; se disattivato segue il trend continuo.
+- **Solo su incrocio (cross)** — (solo modalità IncrocioEma) entra solo sull'incrocio;
+  se disattivato segue il trend continuo.
 - **Filtro trend EMA (periodo, 0 = off)** — long solo se il prezzo è sopra questa EMA lunga,
   short solo se è sotto. Riduce gli ingressi in controtrend (default 200).
 - **Barre minime tra i trade** — cooldown anti-whipsaw tra un ingresso e il successivo.
