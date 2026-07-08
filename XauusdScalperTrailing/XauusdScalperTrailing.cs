@@ -90,7 +90,9 @@ namespace cAlgo.Robots
         private ExponentialMovingAverage _fastEma;
         private ExponentialMovingAverage _slowEma;
         private ExponentialMovingAverage _trendEma;
-        private int _lastTradeBarIndex = int.MinValue;
+        // Sentinella "nessun trade ancora fatto": valore basso ma sicuro, così
+        // (Bars.Count - _lastTradeBarIndex) non va mai in overflow.
+        private int _lastTradeBarIndex = -1000000;
 
         protected override void OnStart()
         {
@@ -239,6 +241,11 @@ namespace cAlgo.Robots
                 return 0;
 
             double rawUnits = riskAmount / lossPerUnit;
+            if (double.IsNaN(rawUnits) || double.IsInfinity(rawUnits) || rawUnits <= 0)
+                return 0;
+
+            // Non superare il volume massimo consentito dal simbolo.
+            rawUnits = Math.Min(rawUnits, Symbol.VolumeInUnitsMax);
             double volume = Symbol.NormalizeVolumeInUnits(rawUnits, RoundingMode.Down);
 
             // Sotto il minimo: non forzo il volume minimo (rischierei più del previsto).
